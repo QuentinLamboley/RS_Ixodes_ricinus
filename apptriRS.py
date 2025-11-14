@@ -14,7 +14,7 @@ st.set_page_config(
 # ------------------------------
 # CHEMIN DU FICHIER EXCEL
 # ------------------------------
-FILE_PATH = r"C:\Users\q.lamboley\Downloads\Revue_systematique_complete_5.xlsx"
+FILE_PATH = "Revue_systematique_resultats.xlsx"
 
 
 # ------------------------------
@@ -197,3 +197,4 @@ else:
 
 st.markdown("---")
 st.write()
+
