@@ -26,6 +26,7 @@ def load_excel(path):
     data = {sheet: pd.read_excel(path, sheet) for sheet in xls.sheet_names}
     return data, xls.sheet_names
 
+
 data, sheet_names = load_excel(FILE_PATH)
 
 # ------------------------------
@@ -83,6 +84,28 @@ st.markdown("---")
 st.header("🔬 Exploration avancée du feuillet `Final_articles_and_variables`")
 
 df_final = data["Final_articles_and_variables"].copy()
+
+# --------------------------
+# NETTOYAGE LÉGER DES DONNÉES
+# --------------------------
+# - suppression des espaces en début/fin de chaîne
+# - harmonisation de certaines modalités (ALL/All, temperature/Temperature, etc.)
+
+str_cols = df_final.select_dtypes(include=["object"]).columns
+for col in str_cols:
+    df_final[col] = df_final[col].apply(
+        lambda x: x.strip() if isinstance(x, str) else x
+    )
+
+# Harmonisation de Life_stage (ALL -> All)
+if "Life_stage" in df_final.columns:
+    df_final["Life_stage"] = df_final["Life_stage"].replace({"ALL": "All"})
+
+# Harmonisation de la variable "temperature" / "Temperature"
+if "Variable_real" in df_final.columns:
+    df_final["Variable_real"] = df_final["Variable_real"].replace(
+        {"temperature": "Temperature"}
+    )
 
 # --------------------------
 # 3.1. FILTRAGE & RECHERCHE
@@ -145,32 +168,58 @@ else:
         index=list(df_filtered.columns).index(default_col)
     )
 
-    # Extraction de la série et calcul de la distribution
-    series = df_filtered[col_to_analyse].dropna()
-    total_non_null = len(series)
+    # Extraction de la série pour la colonne choisie
+    series = df_filtered[col_to_analyse]
     total_rows = len(df_filtered)
+    total_non_null = series.notna().sum()
 
-    if total_non_null == 0:
-        st.warning(f"Aucune valeur non nulle dans la colonne `{col_to_analyse}` pour les résultats filtrés.")
+    if total_rows == 0:
+        st.warning(f"Aucune ligne dans les résultats filtrés pour la colonne `{col_to_analyse}`.")
     else:
-        dist_df = (
-            series.value_counts()
-            .reset_index()
-        )
+        # Comptage des modalités en incluant les NA
+        counts_all = series.value_counts(dropna=False)
+
+        dist_df = counts_all.reset_index()
         dist_df.columns = [col_to_analyse, "N"]
 
-        dist_df["% parmi non nuls"] = dist_df["N"] / total_non_null * 100
+        # Pourcentage parmi toutes les lignes filtrées
         dist_df["% parmi toutes les lignes filtrées"] = dist_df["N"] / total_rows * 100
 
-        # Option pour limiter aux top modalités
+        # Pourcentage parmi les non-nuls (NA n'ont pas de % parmi non nuls)
+        if total_non_null > 0:
+            def pct_non_null(row):
+                if pd.isna(row[col_to_analyse]):
+                    return None
+                return row["N"] / total_non_null * 100
+
+            dist_df["% parmi non nuls"] = dist_df.apply(pct_non_null, axis=1)
+        else:
+            dist_df["% parmi non nuls"] = None
+
+        # Option pour limiter aux top modalités (correction du slider)
+        nb_modalites = dist_df.shape[0]
+        max_for_slider = min(50, nb_modalites)
+        min_for_slider = 1
+        default_val = min(20, max_for_slider)
+
         max_modalities = st.slider(
             "Nombre maximum de modalités à afficher (triées par fréquence décroissante) :",
-            min_value=5,
-            max_value=min(50, dist_df.shape[0]),
-            value=min(20, dist_df.shape[0])
+            min_value=min_for_slider,
+            max_value=max_for_slider,
+            value=default_val
         )
 
-        dist_display = dist_df.head(max_modalities)
+        # Tri par fréquence décroissante et sélection des top modalités
+        dist_df = dist_df.sort_values("N", ascending=False)
+        dist_display = dist_df.head(max_modalities).copy()
+
+        # Remplacement de la modalité NA par un libellé explicite
+        if dist_display[col_to_analyse].isna().any():
+            dist_display[col_to_analyse] = dist_display[col_to_analyse].astype(object)
+            dist_display.loc[
+                dist_display[col_to_analyse].isna(),
+                col_to_analyse
+            ] = "NA / manquant"
 
         st.write(
             f"### 📊 Distribution de la colonne `{col_to_analyse}` "
@@ -183,7 +232,7 @@ else:
         chart_data = dist_display.set_index(col_to_analyse)["N"]
         st.bar_chart(chart_data)
 
-        # Téléchargement des stats de distribution
+        # Téléchargement des stats de distribution complètes (avec toutes les modalités)
         dist_output = io.BytesIO()
         with pd.ExcelWriter(dist_output, engine="openpyxl") as writer:
             dist_df.to_excel(writer, index=False, sheet_name=f"Distribution_{col_to_analyse}")
@@ -197,5 +246,3 @@ else:
 
 st.markdown("---")
 st.write()
-
-
